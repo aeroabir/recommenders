@@ -1,7 +1,7 @@
-# Copyright (c) Microsoft Corporation. All rights reserved.
+# Copyright (c) Recommenders contributors.
 # Licensed under the MIT License.
 
-import pytest
+
 from recommenders.utils.general_utils import invert_dictionary, get_number_processors
 
 

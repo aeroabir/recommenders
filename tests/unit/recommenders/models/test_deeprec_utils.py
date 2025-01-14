@@ -1,12 +1,9 @@
-# Copyright (c) Microsoft Corporation. All rights reserved.
+# Copyright (c) Recommenders contributors.
 # Licensed under the MIT License.
+
 
 import os
 import pytest
-from recommenders.datasets.amazon_reviews import (
-    download_and_extract,
-    data_preprocessing,
-)
 
 try:
     from recommenders.models.deeprec.deeprec_utils import (
@@ -14,14 +11,6 @@ try:
         download_deeprec_resources,
         load_yaml,
     )
-    from recommenders.models.deeprec.io.iterator import FFMTextIterator
-    from recommenders.models.deeprec.io.dkn_item2item_iterator import (
-        DKNItem2itemTextIterator,
-    )
-    from recommenders.models.deeprec.io.dkn_iterator import DKNTextIterator
-    from recommenders.models.deeprec.io.sequential_iterator import SequentialIterator
-    from recommenders.models.deeprec.models.sequential.sli_rec import SLI_RECModel
-    import tensorflow as tf
 except ImportError:
     pass  # skip this import if we are in cpu environment
 
@@ -40,7 +29,8 @@ def test_prepare_hparams(deeprec_resource_path, must_exist_attributes):
             "xdeepfmresources.zip",
         )
     hparams = prepare_hparams(yaml_file)
-    assert hasattr(hparams, must_exist_attributes)
+
+    assert hasattr(hparams, must_exist_attributes) is True
 
 
 @pytest.mark.gpu
@@ -54,6 +44,6 @@ def test_load_yaml_file(deeprec_resource_path):
             data_path,
             "xdeepfmresources.zip",
         )
-
     config = load_yaml(yaml_file)
+
     assert config is not None

@@ -1,4 +1,4 @@
-# Copyright (c) Microsoft Corporation. All rights reserved.
+# Copyright (c) Recommenders contributors.
 # Licensed under the MIT License.
 
 import pandas as pd
@@ -61,9 +61,9 @@ def find_wikidata_id(name, limit=1, session=None):
     try:
         response = session.get(API_URL_WIKIPEDIA, params=params)
         page_id = response.json()["query"]["search"][0]["pageid"]
-    except Exception as e:
+    except Exception:
         # TODO: distinguish between connection error and entity not found
-        logger.error("ENTITY NOT FOUND")
+        logger.warning("ENTITY NOT FOUND")
         return "entityNotFound"
 
     params = dict(
@@ -79,9 +79,9 @@ def find_wikidata_id(name, limit=1, session=None):
         entity_id = response.json()["query"]["pages"][str(page_id)]["pageprops"][
             "wikibase_item"
         ]
-    except Exception as e:
+    except Exception:
         # TODO: distinguish between connection error and entity not found
-        logger.error("ENTITY NOT FOUND")
+        logger.warning("ENTITY NOT FOUND")
         return "entityNotFound"
 
     return entity_id
@@ -138,8 +138,8 @@ def query_entity_links(entity_id, session=None):
         data = session.get(
             API_URL_WIKIDATA, params=dict(query=query, format="json")
         ).json()
-    except Exception as e:
-        logger.error("ENTITY NOT FOUND")
+    except Exception as e:  # noqa: F841
+        logger.warning("ENTITY NOT FOUND")
         return {}
 
     return data
@@ -184,7 +184,7 @@ def query_entity_description(entity_id, session=None):
     PREFIX schema: <http://schema.org/>
 
     SELECT ?o
-    WHERE 
+    WHERE
     {
       wd:"""
         + entity_id
@@ -199,8 +199,8 @@ def query_entity_description(entity_id, session=None):
     try:
         r = session.get(API_URL_WIKIDATA, params=dict(query=query, format="json"))
         description = r.json()["results"]["bindings"][0]["o"]["value"]
-    except Exception as e:
-        logger.error("DESCRIPTION NOT FOUND")
+    except Exception as e:  # noqa: F841
+        logger.warning("DESCRIPTION NOT FOUND")
         return "descriptionNotFound"
 
     return description

@@ -1,4 +1,4 @@
-# Copyright (c) Microsoft Corporation. All rights reserved.
+# Copyright (c) Recommenders contributors.
 # Licensed under the MIT License.
 
 
@@ -107,10 +107,10 @@ def load_spark_df(
             try:
                 # Driver node's file path
                 node_path = "file:" + filepath
-                ## needs to be on dbfs to load
+                # needs to be on dbfs to load
                 dbutils.fs.cp(node_path, dbfs_datapath, recurse=True)
                 path = dbfs_datapath
-            except:
+            except Exception:
                 raise ValueError(
                     "To use on a Databricks notebook, dbutils object should be passed as an argument"
                 )
@@ -157,7 +157,26 @@ def extract_criteo(size, compressed_file, path=None):
         extracted_dir = path
 
     with tarfile.open(compressed_file) as tar:
-        tar.extractall(extracted_dir)
+
+        def is_within_directory(directory, target):
+
+            abs_directory = os.path.abspath(directory)
+            abs_target = os.path.abspath(target)
+
+            prefix = os.path.commonprefix([abs_directory, abs_target])
+
+            return prefix == abs_directory
+
+        def safe_extract(tar, path=".", members=None, *, numeric_owner=False):
+
+            for member in tar.getmembers():
+                member_path = os.path.join(path, member.name)
+                if not is_within_directory(path, member_path):
+                    raise Exception("Attempted Path Traversal in Tar File")
+
+            tar.extractall(path, members, numeric_owner=numeric_owner)
+
+        safe_extract(tar, extracted_dir)
 
     filename_selector = {"sample": "dac_sample.txt", "full": "train.txt"}
     return os.path.join(extracted_dir, filename_selector[size])
@@ -172,13 +191,13 @@ def get_spark_schema(header=DEFAULT_HEADER):
     Returns:
         pyspark.sql.types.StructType: Spark schema.
     """
-    ## create schema
+    # create schema
     schema = StructType()
-    ## do label + ints
+    # do label + ints
     n_ints = 14
     for i in range(n_ints):
         schema.add(StructField(header[i], IntegerType()))
-    ## do categoricals
+    # do categoricals
     for i in range(26):
         schema.add(StructField(header[i + n_ints], StringType()))
     return schema

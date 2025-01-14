@@ -1,9 +1,11 @@
-# Copyright (c) Microsoft Corporation. All rights reserved.
+# Copyright (c) Recommenders contributors.
 # Licensed under the MIT License.
+
 
 import os
 import pytest
 import pandas as pd
+
 from recommenders.utils.constants import (
     DEFAULT_USER_COL,
     DEFAULT_ITEM_COL,
@@ -62,7 +64,7 @@ def test_wide_model(pd_df, tmp):
     model = build_model(
         os.path.join(tmp, "wide_" + MODEL_DIR), wide_columns=wide_columns
     )
-    assert isinstance(model, tf.estimator.LinearRegressor)
+    assert isinstance(model, tf.compat.v1.estimator.LinearRegressor)
     # Test if model train works
     model.train(
         input_fn=pandas_input_fn(
@@ -76,7 +78,7 @@ def test_wide_model(pd_df, tmp):
     )
 
     # Close the event file so that the model folder can be cleaned up.
-    summary_writer = tf.summary.FileWriterCache.get(model.model_dir)
+    summary_writer = tf.compat.v1.summary.FileWriterCache.get(model.model_dir)
     summary_writer.close()
 
 
@@ -91,7 +93,7 @@ def test_deep_model(pd_df, tmp):
     model = build_model(
         os.path.join(tmp, "deep_" + MODEL_DIR), deep_columns=deep_columns
     )
-    assert isinstance(model, tf.estimator.DNNRegressor)
+    assert isinstance(model, tf.compat.v1.estimator.DNNRegressor)
     # Test if model train works
     model.train(
         input_fn=pandas_input_fn(
@@ -100,7 +102,7 @@ def test_deep_model(pd_df, tmp):
     )
 
     # Close the event file so that the model folder can be cleaned up.
-    summary_writer = tf.summary.FileWriterCache.get(model.model_dir)
+    summary_writer = tf.compat.v1.summary.FileWriterCache.get(model.model_dir)
     summary_writer.close()
 
 
@@ -120,7 +122,7 @@ def test_wide_deep_model(pd_df, tmp):
         wide_columns=wide_columns,
         deep_columns=deep_columns,
     )
-    assert isinstance(model, tf.estimator.DNNLinearCombinedRegressor)
+    assert isinstance(model, tf.compat.v1.estimator.DNNLinearCombinedRegressor)
     # Test if model train works
     model.train(
         input_fn=pandas_input_fn(
@@ -134,5 +136,5 @@ def test_wide_deep_model(pd_df, tmp):
     )
 
     # Close the event file so that the model folder can be cleaned up.
-    summary_writer = tf.summary.FileWriterCache.get(model.model_dir)
+    summary_writer = tf.compat.v1.summary.FileWriterCache.get(model.model_dir)
     summary_writer.close()

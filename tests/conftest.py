@@ -1,11 +1,11 @@
-# Copyright (c) Microsoft Corporation. All rights reserved.
+# Copyright (c) Recommenders contributors.
 # Licensed under the MIT License.
 
 # NOTE: This file is used by pytest to inject fixtures automatically. As it is explained in the documentation
 # https://docs.pytest.org/en/latest/fixture.html:
 # "If during implementing your tests you realize that you want to use a fixture function from multiple test files
 # you can move it to a conftest.py file. You don't need to import the module you defined your fixtures to use in a test,
-# it automatically gets discovered by pytest and thus you can simply receive fixture objects by naming them as
+# it automatically gets discovered by pytest, and thus you can simply receive fixture objects by naming them as
 # an input argument in the test."
 
 import calendar
@@ -75,7 +75,6 @@ def spark(tmp_path_factory, app_name="Sample", url="local[*]"):
     Returns:
         SparkSession: new Spark session
     """
-
     with TemporaryDirectory(dir=tmp_path_factory.getbasetemp()) as td:
         config = {
             "spark.local.dir": td,
@@ -138,8 +137,8 @@ def train_test_dummy_timestamp(pandas_dummy_timestamp):
 @pytest.fixture(scope="module")
 def demo_usage_data(header, sar_settings):
     # load the data
-    data = pd.read_csv(sar_settings["FILE_DIR"] + "demoUsage.csv")
-    data["rating"] = pd.Series([1.0] * data.shape[0])
+    data = pd.read_csv(sar_settings["FILE_DIR"] + "demoUsageNoDups.csv")
+    data["rating"] = pd.Series([1] * data.shape[0])
     data = data.rename(
         columns={
             "userId": header["col_user"],
@@ -263,6 +262,9 @@ def notebooks():
         "geoimc_quickstart": os.path.join(
             folder_notebooks, "00_quick_start", "geoimc_movielens.ipynb"
         ),
+        "sasrec_quickstart": os.path.join(
+            folder_notebooks, "00_quick_start", "sasrec_amazon.ipynb"
+        ),
         "data_split": os.path.join(
             folder_notebooks, "01_prepare_data", "data_split.ipynb"
         ),
@@ -291,7 +293,7 @@ def notebooks():
             "lightgcn_deep_dive.ipynb",
         ),
         "ncf_deep_dive": os.path.join(
-            folder_notebooks, "02_model_hybrid", "ncf_deep_dive.ipynb"
+            folder_notebooks, "02_model_collaborative_filtering", "ncf_deep_dive.ipynb"
         ),
         "sar_deep_dive": os.path.join(
             folder_notebooks, "02_model_collaborative_filtering", "sar_deep_dive.ipynb"
@@ -317,7 +319,10 @@ def notebooks():
             "cornac_bivae_deep_dive.ipynb",
         ),
         "xlearn_fm_deep_dive": os.path.join(
-            folder_notebooks, "02_model_hybrid", "fm_deep_dive.ipynb"
+            folder_notebooks, "02_model_collaborative_filtering", "fm_deep_dive.ipynb"
+        ),
+        "lightfm_deep_dive": os.path.join(
+            folder_notebooks, "02_model_collaborative_filtering", "lightfm_deep_dive.ipynb"
         ),
         "evaluation": os.path.join(folder_notebooks, "03_evaluate", "evaluation.ipynb"),
         "evaluation_diversity": os.path.join(
@@ -329,11 +334,14 @@ def notebooks():
         "nni_tuning_svd": os.path.join(
             folder_notebooks, "04_model_select_and_optimize", "nni_surprise_svd.ipynb"
         ),
+        "benchmark_movielens": os.path.join(
+            folder_notebooks, "06_benchmarks", "movielens.ipynb"
+        ),
     }
     return paths
 
 
-### NCF FIXTURES
+# NCF FIXTURES
 
 
 @pytest.fixture(scope="module")
@@ -349,7 +357,7 @@ def test_specs_ncf():
 
 
 @pytest.fixture(scope="module")
-def python_dataset_ncf(test_specs_ncf):
+def dataset_ncf(test_specs_ncf):
     """Get Python labels"""
 
     def random_date_generator(start_date, range_in_days):
@@ -389,6 +397,75 @@ def python_dataset_ncf(test_specs_ncf):
     return train, test
 
 
+@pytest.fixture
+def dataset_ncf_files(dataset_ncf):
+    train, test = dataset_ncf
+    test = test[test["userID"].isin(train["userID"].unique())]
+    test = test[test["itemID"].isin(train["itemID"].unique())]
+    train = train.sort_values(by=DEFAULT_USER_COL)
+    test = test.sort_values(by=DEFAULT_USER_COL)
+    leave_one_out_test = test.groupby("userID").last().reset_index()
+    return train, test, leave_one_out_test
+
+
+@pytest.fixture
+def data_paths(tmp_path):
+    train_path = os.path.join(tmp_path, "train.csv")
+    test_path = os.path.join(tmp_path, "test.csv")
+    leave_one_out_test_path = os.path.join(tmp_path, "leave_one_out_test.csv")
+    return train_path, test_path, leave_one_out_test_path
+
+
+@pytest.fixture
+def dataset_ncf_files_sorted(data_paths, dataset_ncf_files):
+    train_path, test_path, leave_one_out_test_path = data_paths
+    train, test, leave_one_out_test = dataset_ncf_files
+    train.to_csv(train_path, index=False)
+    test.to_csv(test_path, index=False)
+    leave_one_out_test.to_csv(leave_one_out_test_path, index=False)
+    return train_path, test_path, leave_one_out_test_path
+
+
+@pytest.fixture
+def dataset_ncf_files_unsorted(data_paths, dataset_ncf_files):
+    train_path, test_path, leave_one_out_test_path = data_paths
+    train, test, leave_one_out_test = dataset_ncf_files
+    # shift last row to the first
+    train = train.apply(np.roll, shift=1)
+    test = test.apply(np.roll, shift=1)
+    leave_one_out_test = leave_one_out_test.apply(np.roll, shift=1)
+    train.to_csv(train_path, index=False)
+    test.to_csv(test_path, index=False)
+    leave_one_out_test.to_csv(leave_one_out_test_path, index=False)
+    return train_path, test_path, leave_one_out_test_path
+
+
+@pytest.fixture
+def dataset_ncf_files_empty(data_paths, dataset_ncf_files):
+    train_path, test_path, leave_one_out_test_path = data_paths
+    train, test, leave_one_out_test = dataset_ncf_files
+    train = train[0:0]
+    test = test[0:0]
+    leave_one_out_test = leave_one_out_test[0:0]
+    train.to_csv(train_path, index=False)
+    test.to_csv(test_path, index=False)
+    leave_one_out_test.to_csv(leave_one_out_test_path, index=False)
+    return train_path, test_path, leave_one_out_test_path
+
+
+@pytest.fixture
+def dataset_ncf_files_missing_column(data_paths, dataset_ncf_files):
+    train_path, test_path, leave_one_out_test_path = data_paths
+    train, test, leave_one_out_test = dataset_ncf_files
+    train = train.drop(DEFAULT_USER_COL, axis=1)
+    test = test.drop(DEFAULT_USER_COL, axis=1)
+    leave_one_out_test = leave_one_out_test.drop(DEFAULT_USER_COL, axis=1)
+    train.to_csv(train_path, index=False)
+    test.to_csv(test_path, index=False)
+    leave_one_out_test.to_csv(leave_one_out_test_path, index=False)
+    return train_path, test_path, leave_one_out_test_path
+
+
 # RBM Fixtures
 
 
@@ -406,14 +483,14 @@ def test_specs():
 
 @pytest.fixture(scope="module")
 def affinity_matrix(test_specs):
-    """Generate a random user/item affinity matrix. By increasing the likehood of 0 elements we simulate
+    """Generate a random user/item affinity matrix. By increasing the likelihood of 0 elements we simulate
     a typical recommending situation where the input matrix is highly sparse.
 
     Args:
-        users (int): number of users (rows).
-        items (int): number of items (columns).
-        ratings (int): rating scale, e.g. 5 meaning rates are from 1 to 5.
-        spars: probability of obtaining zero. This roughly corresponds to the sparseness.
+        test_specs["users"] (int): number of users (rows).
+        test_specs["items"] (int): number of items (columns).
+        test_specs["ratings"] (int): rating scale, e.g. 5 meaning rates are from 1 to 5.
+        test_specs["spars"]: probability of obtaining zero. This roughly corresponds to the sparseness.
                of the generated matrix. If spars = 0 then the affinity matrix is dense.
 
     Returns:
@@ -437,7 +514,7 @@ def affinity_matrix(test_specs):
         X, ratio=test_specs["ratio"], seed=test_specs["seed"]
     )
 
-    return (Xtr, Xtst)
+    return Xtr, Xtst
 
 
 # DeepRec Fixtures

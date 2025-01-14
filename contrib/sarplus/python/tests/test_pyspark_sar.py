@@ -1,13 +1,14 @@
-import calendar
-import datetime
+# Copyright (c) Recommenders contributors.
+# Licensed under the MIT License.
+
 import math
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
-import pytest
-import os
-from sklearn.model_selection import train_test_split
-
 from pyspark.sql import SparkSession
+import pytest
+from pandas.testing import assert_frame_equal
 
 from pysarplus import SARPlus, SARModel
 
@@ -20,7 +21,7 @@ def assert_compare(expected_id, expected_score, actual_prediction):
 
 
 @pytest.fixture(scope="module")
-def spark(app_name="Sample", url="local[*]", memory="1G"):
+def spark(tmp_path_factory, app_name="Sample", url="local[*]", memory="1G"):
     """Start Spark if not started
     Args:
         app_name (str): sets name of the application
@@ -28,19 +29,26 @@ def spark(app_name="Sample", url="local[*]", memory="1G"):
         memory (str): size of memory for spark driver
     """
 
+    try:
+        sarplus_jar_path = next(
+            Path(__file__)
+            .parents[2]
+            .joinpath("scala", "target")
+            .glob("**/sarplus*.jar")
+        ).absolute()
+    except StopIteration:
+        raise Exception("Could not find Sarplus JAR file")
+
     spark = (
         SparkSession.builder.appName(app_name)
         .master(url)
-        .config(
-            "spark.jars",
-            os.path.dirname(__file__)
-            + "/../../scala/target/scala-2.11/sarplus_2.11-0.2.6.jar",
-        )
+        .config("spark.jars", sarplus_jar_path)
         .config("spark.driver.memory", memory)
         .config("spark.sql.shuffle.partitions", "1")
         .config("spark.default.parallelism", "1")
         .config("spark.sql.crossJoin.enabled", True)
         .config("spark.ui.enabled", False)
+        .config("spark.sql.warehouse.dir", str(tmp_path_factory.mktemp("spark")))
         # .config("spark.eventLog.enabled", True) # only for local debugging, breaks on build server
         .getOrCreate()
     )
@@ -57,17 +65,6 @@ def sample_cache(spark):
     df.coalesce(1).write.format("com.microsoft.sarplus").mode("overwrite").save(path)
 
     return path
-
-
-@pytest.fixture(scope="module")
-def header():
-    header = {
-        "col_user": "UserId",
-        "col_item": "MovieId",
-        "col_rating": "Rating",
-        "col_timestamp": "Timestamp",
-    }
-    return header
 
 
 @pytest.fixture(scope="module")
@@ -144,7 +141,7 @@ def test_pandas(spark, sample_cache):
 
 @pytest.mark.spark
 def test_e2e(spark, pandas_dummy_dataset, header):
-    sar = SARPlus(spark, **header)
+    sar = SARPlus(spark, **header, cache_path="tests/test_e2e_cache")
 
     df = spark.createDataFrame(pandas_dummy_dataset)
     sar.fit(df)
@@ -154,7 +151,7 @@ def test_e2e(spark, pandas_dummy_dataset, header):
     )
 
     r1 = (
-        sar.recommend_k_items_slow(test_df, top_k=3, remove_seen=False)
+        sar.recommend_k_items(test_df, top_k=3, remove_seen=False)
         .toPandas()
         .sort_values([header["col_user"], header["col_item"]])
         .reset_index(drop=True)
@@ -163,10 +160,10 @@ def test_e2e(spark, pandas_dummy_dataset, header):
     r2 = (
         sar.recommend_k_items(
             test_df,
-            "tests/test_e2e_cache",
             top_k=3,
             n_user_prediction_partitions=2,
             remove_seen=False,
+            use_cache=True,
         )
         .toPandas()
         .sort_values([header["col_user"], header["col_item"]])
@@ -175,78 +172,6 @@ def test_e2e(spark, pandas_dummy_dataset, header):
 
     assert (r1.iloc[:, :2] == r2.iloc[:, :2]).all().all()
     assert np.allclose(r1.score.values, r2.score.values, 1e-3)
-
-
-@pytest.fixture(scope="module")
-def pandas_dummy(header):
-    ratings_dict = {
-        header["col_user"]: [1, 1, 1, 1, 2, 2, 2, 2, 2, 2],
-        header["col_item"]: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
-        header["col_rating"]: [1, 2, 3, 4, 5, 1, 2, 3, 4, 5],
-    }
-    df = pd.DataFrame(ratings_dict)
-    return df
-
-
-@pytest.fixture(scope="module")
-def pandas_dummy_timestamp(pandas_dummy, header):
-    time = 1535133442
-    time_series = [time + 20 * i for i in range(10)]
-    df = pandas_dummy
-    df[header["col_timestamp"]] = time_series
-    return df
-
-
-@pytest.fixture(scope="module")
-def train_test_dummy_timestamp(pandas_dummy_timestamp):
-    return train_test_split(pandas_dummy_timestamp, test_size=0.2, random_state=0)
-
-
-@pytest.fixture(scope="module")
-def demo_usage_data(header, sar_settings):
-    # load the data
-    data = pd.read_csv(sar_settings["FILE_DIR"] + "demoUsage.csv")
-    data["rating"] = pd.Series([1] * data.shape[0])
-    data = data.rename(
-        columns={
-            "userId": header["col_user"],
-            "productId": header["col_item"],
-            "rating": header["col_rating"],
-            "timestamp": header["col_timestamp"],
-        }
-    )
-
-    # convert timestamp
-    data[header["col_timestamp"]] = data[header["col_timestamp"]].apply(
-        lambda s: float(
-            calendar.timegm(
-                datetime.datetime.strptime(s, "%Y/%m/%dT%H:%M:%S").timetuple()
-            )
-        )
-    )
-
-    return data
-
-
-@pytest.fixture(scope="module")
-def demo_usage_data_spark(spark, demo_usage_data, header):
-    data_local = demo_usage_data[[x[1] for x in header.items()]]
-    # TODO: install pyArrow in DS VM
-    # spark.conf.set("spark.sql.execution.arrow.enabled", "true")
-    data = spark.createDataFrame(data_local)
-    return data
-
-
-@pytest.fixture(scope="module")
-def sar_settings():
-    return {
-        # absolute tolerance parameter for matrix equivalence in SAR tests
-        "ATOL": 1e-8,
-        # directory of the current file - used to link unit test data
-        "FILE_DIR": "http://recodatasets.blob.core.windows.net/sarunittest/",
-        # user ID used in the test files (they are designed for this user ID, this is part of the test)
-        "TEST_USER_ID": "0003000098E85347",
-    }
 
 
 @pytest.mark.parametrize(
@@ -259,7 +184,7 @@ def test_fit(
         spark,
         **header,
         timedecay_formula=timedecay_formula,
-        similarity_type=similarity_type
+        similarity_type=similarity_type,
     )
 
     trainset, testset = train_test_dummy_timestamp
@@ -276,6 +201,7 @@ def test_fit(
 Main SAR tests are below - load test files which are used for both Scala SAR and Python reference implementations
 """
 
+
 # Tests 1-6
 @pytest.mark.parametrize(
     "threshold,similarity_type,file",
@@ -289,7 +215,13 @@ Main SAR tests are below - load test files which are used for both Scala SAR and
     ],
 )
 def test_sar_item_similarity(
-    spark, threshold, similarity_type, file, demo_usage_data, sar_settings, header
+    spark,
+    threshold,
+    similarity_type,
+    file,
+    demo_usage_data,
+    sar_settings,
+    header,
 ):
 
     model = SARPlus(
@@ -299,7 +231,7 @@ def test_sar_item_similarity(
         time_decay_coefficient=30,
         time_now=None,
         threshold=threshold,
-        similarity_type=similarity_type
+        similarity_type=similarity_type,
     )
 
     df = spark.createDataFrame(demo_usage_data)
@@ -339,7 +271,9 @@ def test_sar_item_similarity(
         )
 
         assert np.allclose(
-            item_similarity.value.values, item_similarity_ref.value.values
+            item_similarity.value.values,
+            item_similarity_ref.value.values,
+            atol=sar_settings["ATOL"],
         )
 
 
@@ -353,7 +287,7 @@ def test_user_affinity(spark, demo_usage_data, sar_settings, header):
         timedecay_formula=True,
         time_decay_coefficient=30,
         time_now=time_now,
-        similarity_type="cooccurrence"
+        similarity_type="cooccurrence",
     )
 
     df = spark.createDataFrame(demo_usage_data)
@@ -386,6 +320,32 @@ def test_user_affinity(spark, demo_usage_data, sar_settings, header):
         atol=sar_settings["ATOL"],
     )
 
+    # Set time_now to 60 days later
+    user_affinity_ref = (
+        pd.read_csv(sar_settings["FILE_DIR"] + "user_aff_2_months_later.csv")
+        .iloc[:, 1:]
+        .squeeze()
+    )
+    user_affinity_ref = user_affinity_ref[user_affinity_ref > 0]
+
+    two_months = 2 * 30 * (24 * 60 * 60)
+    model = SARPlus(
+        spark,
+        **header,
+        timedecay_formula=True,
+        time_decay_coefficient=30,
+        time_now=demo_usage_data[header["col_timestamp"]].max() + two_months,
+        similarity_type="cooccurrence",
+    )
+    model.fit(spark.createDataFrame(demo_usage_data))
+    df_test = pd.DataFrame({header["col_user"]: [sar_settings["TEST_USER_ID"]]})
+    df_test = spark.createDataFrame(df_test)
+    user_affinity = model.get_user_affinity(df_test).toPandas()
+    user_affinity = user_affinity.set_index(header["col_item"])[header["col_rating"]]
+    user_affinity = user_affinity[user_affinity_ref.index]
+
+    assert np.allclose(user_affinity_ref, user_affinity, atol=sar_settings["ATOL"])
+
 
 # Tests 8-10
 @pytest.mark.parametrize(
@@ -393,7 +353,14 @@ def test_user_affinity(spark, demo_usage_data, sar_settings, header):
     [(3, "cooccurrence", "count"), (3, "jaccard", "jac"), (3, "lift", "lift")],
 )
 def test_userpred(
-    spark, threshold, similarity_type, file, header, sar_settings, demo_usage_data
+    spark,
+    tmp_path,
+    threshold,
+    similarity_type,
+    file,
+    header,
+    sar_settings,
+    demo_usage_data,
 ):
     time_now = demo_usage_data[header["col_timestamp"]].max()
 
@@ -407,7 +374,8 @@ def test_userpred(
         time_decay_coefficient=30,
         time_now=time_now,
         threshold=threshold,
-        similarity_type=similarity_type
+        similarity_type=similarity_type,
+        cache_path=str(tmp_path.joinpath("test_userpred-" + test_id)),
     )
 
     df = spark.createDataFrame(demo_usage_data)
@@ -428,16 +396,16 @@ def test_userpred(
         .reset_index(drop=True)
     )
 
-    # Note: it's important to have a separate cache_path for each run as they're interferring with each other
+    # Note: it's important to have a separate cache_path for each run as they're interfering with each other
     pred = model.recommend_k_items(
         spark.createDataFrame(
             demo_usage_data[
                 demo_usage_data[header["col_user"]] == sar_settings["TEST_USER_ID"]
             ]
         ),
-        cache_path="test_userpred-" + test_id,
         top_k=10,
         n_user_prediction_partitions=1,
+        use_cache=True,
     )
 
     pred = pred.toPandas().sort_values("score", ascending=False).reset_index(drop=True)
@@ -446,3 +414,91 @@ def test_userpred(
     assert np.allclose(
         pred.score.values, pred_ref.score.values, atol=sar_settings["ATOL"]
     )
+
+
+@pytest.mark.spark
+def test_get_popularity_based_topk(spark):
+    # same df as in tests/unit/recommenders/models/test_sar_singlenode.py
+    train_pd = pd.DataFrame(
+        {
+            "user_id": [1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 4],
+            "item_id": [1, 4, 2, 1, 5, 4, 1, 4, 6, 3, 2, 4],
+            "rating": [1, 2, 3, 1, 2, 3, 1, 2, 3, 3, 3, 1],
+        }
+    )
+    train_df = spark.createDataFrame(train_pd)
+
+    model = SARPlus(
+        spark,
+        col_user="user_id",
+        col_item="item_id",
+        col_rating="rating",
+        col_timestamp="timestamp",
+        similarity_type="jaccard",
+    )
+    model.fit(train_df)
+
+    actual = model.get_popularity_based_topk(top_k=3).toPandas()
+    expected = pd.DataFrame(
+        {
+            "item_id": [4, 1, 2],
+            "frequency": [4, 3, 2],
+        }
+    )
+    assert_frame_equal(expected, actual, check_dtype=False)
+
+
+@pytest.mark.spark
+def test_get_topk_most_similar_users(spark):
+    # same df as in tests/unit/recommenders/models/test_sar_singlenode.py
+    train_pd = pd.DataFrame(
+        {
+            "user_id": [1, 1, 2, 2, 3, 3, 3, 3, 4, 4],
+            "item_id": [1, 2, 1, 2, 3, 4, 5, 6, 1, 2],
+            "rating": [3.0, 4.0, 3.0, 4.0, 3.0, 2.0, 1.0, 5.0, 5.0, 1.0],
+        }
+    )
+    train_df = spark.createDataFrame(train_pd)
+
+    model = SARPlus(
+        spark,
+        col_user="user_id",
+        col_item="item_id",
+        col_rating="rating",
+        col_timestamp="timestamp",
+        similarity_type="jaccard",
+    )
+    model.fit(train_df)
+
+    actual = model.get_topk_most_similar_users(
+        test=train_df, user=1, top_k=1
+    ).toPandas()
+    expected = pd.DataFrame(
+        {
+            "user_id": [2],
+            "similarity": [25.0],
+        }
+    )
+    assert_frame_equal(expected, actual, check_dtype=False)
+
+    actual = model.get_topk_most_similar_users(
+        test=train_df, user=2, top_k=1
+    ).toPandas()
+    expected = pd.DataFrame(
+        {
+            "user_id": [1],
+            "similarity": [25.0],
+        }
+    )
+    assert_frame_equal(expected, actual, check_dtype=False)
+
+    actual = model.get_topk_most_similar_users(
+        test=train_df, user=1, top_k=2
+    ).toPandas()
+    expected = pd.DataFrame(
+        {
+            "user_id": [2, 4],
+            "similarity": [25.0, 19.0],
+        }
+    )
+    assert_frame_equal(expected, actual, check_dtype=False)

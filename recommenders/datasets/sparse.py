@@ -1,4 +1,4 @@
-# Copyright (c) Microsoft Corporation. All rights reserved.
+# Copyright (c) Recommenders contributors.
 # Licensed under the MIT License.
 
 import pandas as pd
@@ -13,7 +13,6 @@ from recommenders.utils.constants import (
     DEFAULT_USER_COL,
     DEFAULT_ITEM_COL,
     DEFAULT_RATING_COL,
-    DEFAULT_TIMESTAMP_COL,
     DEFAULT_PREDICTION_COL,
 )
 

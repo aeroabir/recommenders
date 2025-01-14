@@ -1,11 +1,13 @@
-# Copyright (c) Microsoft Corporation. All rights reserved.
+# Copyright (c) Recommenders contributors.
 # Licensed under the MIT License.
 
-import pandas as pd
 import numpy as np
 import math
+import logging
 
 from recommenders.utils.constants import DEFAULT_ITEM_COL, DEFAULT_USER_COL
+
+logger = logging.getLogger(__name__)
 
 try:
     from pyspark.sql import functions as F, Window
@@ -136,8 +138,7 @@ def _get_column_name(name, col_user, col_item):
 def split_pandas_data_with_ratios(data, ratios, seed=42, shuffle=False):
     """Helper function to split pandas DataFrame with given ratios
 
-    .. note::
-
+    Note:
         Implementation referenced from `this source <https://stackoverflow.com/questions/38250710/how-to-split-data-into-3-sets-train-validation-and-test>`_.
 
     Args:
@@ -164,3 +165,35 @@ def split_pandas_data_with_ratios(data, ratios, seed=42, shuffle=False):
         splits[i]["split_index"] = i
 
     return splits
+
+
+def filter_k_core(data, core_num=0, col_user="userID", col_item="itemID"):
+    """Filter rating dataframe for minimum number of users and items by
+    repeatedly applying min_rating_filter until the condition is satisfied.
+
+    """
+    num_users, num_items = len(data[col_user].unique()), len(data[col_item].unique())
+    logger.info("Original: %d users and %d items", num_users, num_items)
+    df_inp = data.copy()
+
+    if core_num > 0:
+        while True:
+            df_inp = min_rating_filter_pandas(
+                df_inp, min_rating=core_num, filter_by="item"
+            )
+            df_inp = min_rating_filter_pandas(
+                df_inp, min_rating=core_num, filter_by="user"
+            )
+            count_u = df_inp.groupby(col_user)[col_item].count()
+            count_i = df_inp.groupby(col_item)[col_user].count()
+            if (
+                len(count_i[count_i < core_num]) == 0
+                and len(count_u[count_u < core_num]) == 0
+            ):
+                break
+    df_inp = df_inp.sort_values(by=[col_user])
+    num_users = len(df_inp[col_user].unique())
+    num_items = len(df_inp[col_item].unique())
+    logger.info("Final: %d users and %d items", num_users, num_items)
+
+    return df_inp

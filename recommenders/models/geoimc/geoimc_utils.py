@@ -1,10 +1,8 @@
-# Copyright (c) Microsoft Corporation. All rights reserved.
+# Copyright (c) Recommenders contributors.
 # Licensed under the MIT License.
 
 import numpy as np
 from sklearn.decomposition import PCA
-
-from recommenders.datasets.download_utils import maybe_download
 
 
 def length_normalize(matrix):
@@ -16,7 +14,7 @@ def length_normalize(matrix):
     Returns:
         Normalized matrix
     """
-    norms = np.sqrt(np.sum(matrix ** 2, axis=1))
+    norms = np.sqrt(np.sum(matrix**2, axis=1))
     norms[norms == 0] = 1
     return matrix / norms[:, np.newaxis]
 

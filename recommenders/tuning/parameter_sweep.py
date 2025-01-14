@@ -1,4 +1,4 @@
-# Copyright (c) Microsoft Corporation. All rights reserved.
+# Copyright (c) Recommenders contributors.
 # Licensed under the MIT License.
 #
 # Utility functions for parameter sweep.
@@ -11,16 +11,16 @@ def generate_param_grid(params):
     Generate parameter lists from a parameter dictionary in the form of:
 
     .. code-block:: python
-       
+
        {
            "param1": [value1, value2],
            "param2": [value1, value2]
        }
-    
+
     to:
-    
+
     .. code-block:: python
-        
+
        [
            {"param1": value1, "param2": value1},
            {"param1": value2, "param2": value1},

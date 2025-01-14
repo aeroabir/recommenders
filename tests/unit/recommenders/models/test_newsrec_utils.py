@@ -1,4 +1,4 @@
-# Copyright (c) Microsoft Corporation. All rights reserved.
+# Copyright (c) Recommenders contributors.
 # Licensed under the MIT License.
 
 import os
@@ -7,7 +7,6 @@ import pytest
 try:
     from recommenders.models.deeprec.deeprec_utils import download_deeprec_resources
     from recommenders.models.newsrec.newsrec_utils import prepare_hparams, load_yaml
-    import tensorflow as tf
 except ImportError:
     pass  # skip this import if we are in cpu environment
 

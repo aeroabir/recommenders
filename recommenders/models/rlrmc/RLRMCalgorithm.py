@@ -1,4 +1,4 @@
-# Copyright (c) Microsoft Corporation. All rights reserved.
+# Copyright (c) Recommenders contributors.
 # Licensed under the MIT License.
 
 import numpy as np
@@ -7,7 +7,7 @@ import logging
 from pymanopt import Problem
 from recommenders.models.rlrmc.conjugate_gradient_ms import ConjugateGradientMS
 from pymanopt.solvers.linesearch import LineSearchBackTracking
-from pymanopt.manifolds import Stiefel, PositiveDefinite, Product
+from pymanopt.manifolds import Stiefel, SymmetricPositiveDefinite, Product
 from math import sqrt
 from scipy.sparse import csr_matrix
 from scipy.sparse.linalg import svds
@@ -95,7 +95,9 @@ class RLRMCalgorithm(object):
         # residual variable
         residual_global = np.zeros(RLRMCdata.train.data.shape, dtype=np.float64)
 
-        ###################Riemannian first-order algorithm######################
+        ####################################
+        # Riemannian first-order algorithm #
+        ####################################
 
         solver = ConjugateGradientMS(
             maxtime=self.max_time,
@@ -107,7 +109,7 @@ class RLRMCalgorithm(object):
             [
                 Stiefel(self.model_param.get("num_row"), self.rank),
                 Stiefel(self.model_param.get("num_col"), self.rank),
-                PositiveDefinite(self.rank),
+                SymmetricPositiveDefinite(self.rank),
             ]
         )
         problem = Problem(
@@ -186,7 +188,7 @@ class RLRMCalgorithm(object):
         U2 = weights[1]
         B = weights[2]
         U1_dot_B = np.dot(U1, B)
-        train_mse = np.mean(residual_global ** 2)
+        train_mse = np.mean(residual_global**2)
         train_rmse = sqrt(train_mse)
         stats.setdefault("trainRMSE", []).append(train_rmse)
         # Prediction
@@ -199,7 +201,7 @@ class RLRMCalgorithm(object):
                 entries_validation_csr_indptr,
                 residual_validation_global,
             )
-            validation_mse = np.mean(residual_validation_global ** 2)
+            validation_mse = np.mean(residual_validation_global**2)
             validation_rmse = sqrt(validation_mse)
             stats.setdefault("validationRMSE", []).append(validation_rmse)
             logger.info(
@@ -231,7 +233,7 @@ class RLRMCalgorithm(object):
             entries_train_csr_indptr,
             residual_global,
         )
-        objective = 0.5 * np.sum((residual_global) ** 2) + 0.5 * self.C * np.sum(B ** 2)
+        objective = 0.5 * np.sum((residual_global) ** 2) + 0.5 * self.C * np.sum(B**2)
         return objective
 
     # computes the gradient of the objective function at a given point

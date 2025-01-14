@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) Recommenders contributors.
+ * Licensed under the MIT License.
+ */
+
 package com.microsoft.sarplus
 
 import org.apache.spark.sql.sources.DataSourceRegister

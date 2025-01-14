@@ -1,78 +1,20 @@
-# Copyright (c) Microsoft Corporation. All rights reserved.
+# Copyright (c) Recommenders contributors.
 # Licensed under the MIT License.
 
-import codecs
-import csv
-import itertools
+
+import json
 import pytest
+import itertools
 import numpy as np
 import pandas as pd
 from pandas.testing import assert_frame_equal
-import urllib
 
 from recommenders.utils.constants import DEFAULT_PREDICTION_COL
-from recommenders.models.sar.sar_singlenode import SARSingleNode
-
-
-def _csv_reader_url(url, delimiter=",", encoding="utf-8"):
-    ftpstream = urllib.request.urlopen(url)
-    csvfile = csv.reader(codecs.iterdecode(ftpstream, encoding), delimiter=delimiter)
-    return csvfile
-
-
-def load_affinity(file):
-    """Loads user affinities from test dataset"""
-    reader = _csv_reader_url(file)
-    items = next(reader)[1:]
-    affinities = np.array(next(reader)[1:])
-    return affinities, items
-
-
-def load_userpred(file, k=10):
-    """Loads test predicted items and their SAR scores"""
-    reader = _csv_reader_url(file)
-    next(reader)
-    values = next(reader)
-    items = values[1 : (k + 1)]
-    scores = np.array([float(x) for x in values[(k + 1) :]])
-    return items, scores
-
-
-def read_matrix(file, row_map=None, col_map=None):
-    """read in test matrix and hash it"""
-    reader = _csv_reader_url(file)
-
-    # skip the header
-    col_ids = next(reader)[1:]
-    row_ids = []
-    rows = []
-    for row in reader:
-        rows += [row[1:]]
-        row_ids += [row[0]]
-    array = np.array(rows)
-
-    # now map the rows and columns to the right values
-    if row_map is not None and col_map is not None:
-        row_index = [row_map[x] for x in row_ids]
-        col_index = [col_map[x] for x in col_ids]
-        array = array[row_index, :]
-        array = array[:, col_index]
-    return array, row_ids, col_ids
-
-
-def _rearrange_to_test(array, row_ids, col_ids, row_map, col_map):
-    """Rearranges SAR array into test array order"""
-    if row_ids is not None:
-        row_index = [row_map[x] for x in row_ids]
-        array = array[row_index, :]
-    if col_ids is not None:
-        col_index = [col_map[x] for x in col_ids]
-        array = array[:, col_index]
-    return array
+from recommenders.models.sar import SAR
 
 
 def test_init(header):
-    model = SARSingleNode(similarity_type="jaccard", **header)
+    model = SAR(similarity_type="jaccard", **header)
 
     assert model.col_user == "UserId"
     assert model.col_item == "MovieId"
@@ -81,8 +23,8 @@ def test_init(header):
     assert model.col_prediction == "prediction"
     assert model.similarity_type == "jaccard"
     assert model.time_decay_half_life == 2592000
-    assert model.time_decay_flag == False
-    assert model.time_now == None
+    assert model.time_decay_flag is False
+    assert model.time_now is None
     assert model.threshold == 1
 
 
@@ -90,7 +32,7 @@ def test_init(header):
     "similarity_type, timedecay_formula", [("jaccard", False), ("lift", True)]
 )
 def test_fit(similarity_type, timedecay_formula, train_test_dummy_timestamp, header):
-    model = SARSingleNode(
+    model = SAR(
         similarity_type=similarity_type, timedecay_formula=timedecay_formula, **header
     )
     trainset, testset = train_test_dummy_timestamp
@@ -103,7 +45,7 @@ def test_fit(similarity_type, timedecay_formula, train_test_dummy_timestamp, hea
 def test_predict(
     similarity_type, timedecay_formula, train_test_dummy_timestamp, header
 ):
-    model = SARSingleNode(
+    model = SAR(
         similarity_type=similarity_type, timedecay_formula=timedecay_formula, **header
     )
     trainset, testset = train_test_dummy_timestamp
@@ -111,14 +53,14 @@ def test_predict(
     preds = model.predict(testset)
 
     assert len(preds) == 2
-    assert isinstance(preds, pd.DataFrame)
+    assert isinstance(preds, pd.DataFrame) is True
     assert preds[header["col_user"]].dtype == trainset[header["col_user"]].dtype
     assert preds[header["col_item"]].dtype == trainset[header["col_item"]].dtype
     assert preds[DEFAULT_PREDICTION_COL].dtype == trainset[header["col_rating"]].dtype
 
 
 def test_predict_all_items(train_test_dummy_timestamp, header):
-    model = SARSingleNode(**header)
+    model = SAR(**header)
     trainset, _ = train_test_dummy_timestamp
     model.fit(trainset)
 
@@ -139,18 +81,26 @@ def test_predict_all_items(train_test_dummy_timestamp, header):
     "threshold,similarity_type,file",
     [
         (1, "cooccurrence", "count"),
+        (1, "cosine", "cos"),
+        (1, "inclusion index", "incl"),
         (1, "jaccard", "jac"),
+        (1, "lexicographers mutual information", "lex"),
         (1, "lift", "lift"),
+        (1, "mutual information", "mi"),
         (3, "cooccurrence", "count"),
+        (3, "cosine", "cos"),
+        (3, "inclusion index", "incl"),
         (3, "jaccard", "jac"),
+        (3, "lexicographers mutual information", "lex"),
         (3, "lift", "lift"),
+        (3, "mutual information", "mi"),
     ],
 )
 def test_sar_item_similarity(
     threshold, similarity_type, file, demo_usage_data, sar_settings, header
 ):
 
-    model = SARSingleNode(
+    model = SAR(
         similarity_type=similarity_type,
         timedecay_formula=False,
         time_decay_coefficient=30,
@@ -158,38 +108,47 @@ def test_sar_item_similarity(
         **header
     )
 
-    model.fit(demo_usage_data)
-
-    true_item_similarity, row_ids, col_ids = read_matrix(
-        sar_settings["FILE_DIR"] + "sim_" + file + str(threshold) + ".csv"
+    # Remove duplicates
+    demo_usage_data = demo_usage_data.sort_values(
+        header["col_timestamp"], ascending=False
+    )
+    demo_usage_data = demo_usage_data.drop_duplicates(
+        [header["col_user"], header["col_item"]], keep="first"
     )
 
+    model.fit(demo_usage_data)
+
+    true_item_similarity = pd.read_csv(
+        sar_settings["FILE_DIR"] + "sim_" + file + str(threshold) + ".csv", index_col=0
+    )
+    item2index = pd.Series(model.item2index)
+    index = item2index[true_item_similarity.index]
+    columns = item2index[true_item_similarity.columns]
+
     if similarity_type == "cooccurrence":
-        test_item_similarity = _rearrange_to_test(
-            model.item_similarity.todense(),
-            row_ids,
-            col_ids,
-            model.item2index,
-            model.item2index,
+        test_item_similarity = pd.DataFrame(model.item_similarity.todense())
+        test_item_similarity = test_item_similarity.reindex(
+            index=index, columns=columns
         )
         assert np.array_equal(
-            true_item_similarity.astype(test_item_similarity.dtype),
-            test_item_similarity,
+            true_item_similarity.astype("float64"),
+            test_item_similarity.astype("float64"),
         )
     else:
-        test_item_similarity = _rearrange_to_test(
-            model.item_similarity, row_ids, col_ids, model.item2index, model.item2index
+        test_item_similarity = pd.DataFrame(model.item_similarity)
+        test_item_similarity = test_item_similarity.reindex(
+            index=index, columns=columns
         )
         assert np.allclose(
-            true_item_similarity.astype(test_item_similarity.dtype),
-            test_item_similarity,
+            true_item_similarity.astype("float64"),
+            test_item_similarity.astype("float64"),
             atol=sar_settings["ATOL"],
         )
 
 
 def test_user_affinity(demo_usage_data, sar_settings, header):
     time_now = demo_usage_data[header["col_timestamp"]].max()
-    model = SARSingleNode(
+    model = SAR(
         similarity_type="cooccurrence",
         timedecay_formula=True,
         time_decay_coefficient=30,
@@ -198,34 +157,69 @@ def test_user_affinity(demo_usage_data, sar_settings, header):
     )
     model.fit(demo_usage_data)
 
-    true_user_affinity, items = load_affinity(sar_settings["FILE_DIR"] + "user_aff.csv")
-    user_index = model.user2index[sar_settings["TEST_USER_ID"]]
-    sar_user_affinity = np.reshape(
-        np.array(
-            _rearrange_to_test(
-                model.user_affinity, None, items, None, model.item2index
-            )[
-                user_index,
-            ].todense()
-        ),
-        -1,
+    true_user_affinity = pd.read_csv(
+        sar_settings["FILE_DIR"] + "user_aff.csv", index_col=0
+    )
+    sar_user_affinity = (
+        model.user_affinity[
+            model.user2index[sar_settings["TEST_USER_ID"]],
+            pd.Series(model.item2index)[true_user_affinity.columns],
+        ]
+        .toarray()
+        .flatten()
     )
     assert np.allclose(
-        true_user_affinity.astype(sar_user_affinity.dtype),
-        sar_user_affinity,
+        true_user_affinity.astype("float64"),
+        sar_user_affinity.astype("float64"),
+        atol=sar_settings["ATOL"],
+    )
+
+    # Set time_now to 60 days later
+    two_months = 2 * 30 * (24 * 60 * 60)
+    model = SAR(
+        similarity_type="cooccurrence",
+        timedecay_formula=True,
+        time_decay_coefficient=30,
+        time_now=demo_usage_data[header["col_timestamp"]].max() + two_months,
+        **header
+    )
+    model.fit(demo_usage_data)
+
+    true_user_affinity = pd.read_csv(
+        sar_settings["FILE_DIR"] + "user_aff_2_months_later.csv", index_col=0
+    )
+    sar_user_affinity = (
+        model.user_affinity[
+            model.user2index[sar_settings["TEST_USER_ID"]],
+            pd.Series(model.item2index)[true_user_affinity.columns],
+        ]
+        .toarray()
+        .flatten()
+    )
+    assert np.allclose(
+        true_user_affinity.astype("float64"),
+        sar_user_affinity.astype("float64"),
         atol=sar_settings["ATOL"],
     )
 
 
 @pytest.mark.parametrize(
     "threshold,similarity_type,file",
-    [(3, "cooccurrence", "count"), (3, "jaccard", "jac"), (3, "lift", "lift")],
+    [
+        (3, "cooccurrence", "count"),
+        (3, "cosine", "cos"),
+        (3, "inclusion index", "incl"),
+        (3, "jaccard", "jac"),
+        (3, "lexicographers mutual information", "lex"),
+        (3, "lift", "lift"),
+        (3, "mutual information", "mi"),
+    ],
 )
 def test_recommend_k_items(
     threshold, similarity_type, file, header, sar_settings, demo_usage_data
 ):
     time_now = demo_usage_data[header["col_timestamp"]].max()
-    model = SARSingleNode(
+    model = SAR(
         similarity_type=similarity_type,
         timedecay_formula=True,
         time_decay_coefficient=30,
@@ -235,12 +229,9 @@ def test_recommend_k_items(
     )
     model.fit(demo_usage_data)
 
-    true_items, true_scores = load_userpred(
-        sar_settings["FILE_DIR"]
-        + "userpred_"
-        + file
-        + str(threshold)
-        + "_userid_only.csv"
+    true_userpred = pd.read_csv(
+        sar_settings["FILE_DIR"] + "userpred_" + file + str(threshold) + ".csv",
+        index_col=0,
     )
     test_results = model.recommend_k_items(
         demo_usage_data[
@@ -250,15 +241,17 @@ def test_recommend_k_items(
         sort_top_k=True,
         remove_seen=True,
     )
-    test_items = list(test_results[header["col_item"]])
-    test_scores = np.array(test_results["prediction"])
-    assert true_items == test_items
-    assert np.allclose(true_scores, test_scores, atol=sar_settings["ATOL"])
+
+    if true_userpred.shape[0] == 0:
+        assert test_results.shape[0] == 0
+    else:
+        pd.testing.assert_frame_equal(
+            test_results, true_userpred, atol=sar_settings["ATOL"]
+        )
 
 
 def test_get_item_based_topk(header, pandas_dummy):
-
-    sar = SARSingleNode(**header)
+    sar = SAR(**header)
     sar.fit(pandas_dummy)
 
     # test with just items provided
@@ -306,20 +299,24 @@ def test_get_item_based_topk(header, pandas_dummy):
 
 
 def test_get_popularity_based_topk(header):
-
     train_df = pd.DataFrame(
         {
-            header["col_user"]: [1, 1, 1, 2, 2, 2, 3, 3, 3],
-            header["col_item"]: [1, 2, 3, 1, 3, 4, 5, 6, 1],
-            header["col_rating"]: [1, 2, 3, 1, 2, 3, 1, 2, 3],
+            header["col_user"]: [1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 4],
+            header["col_item"]: [1, 4, 2, 1, 5, 4, 1, 4, 6, 3, 2, 4],
+            header["col_rating"]: [1, 2, 3, 1, 2, 3, 1, 2, 3, 3, 3, 1],
         }
     )
 
-    sar = SARSingleNode(**header)
+    sar = SAR(**header)
     sar.fit(train_df)
 
-    expected = pd.DataFrame(dict(MovieId=[1, 3, 4], prediction=[3, 2, 1]))
+    expected = pd.DataFrame(dict(MovieId=[4, 1, 2], prediction=[4, 3, 2]))
     actual = sar.get_popularity_based_topk(top_k=3, sort_top_k=True)
+    assert_frame_equal(expected, actual)
+
+    # get most popular users
+    expected = pd.DataFrame(dict(UserId=[3, 2, 1], prediction=[5, 4, 2]))
+    actual = sar.get_popularity_based_topk(top_k=3, sort_top_k=True, items=False)
     assert_frame_equal(expected, actual)
 
 
@@ -340,7 +337,7 @@ def test_get_normalized_scores(header):
         }
     )
 
-    model = SARSingleNode(**header, timedecay_formula=True, normalize=True)
+    model = SAR(**header, timedecay_formula=True, normalize=True)
     model.fit(train)
     actual = model.score(test, remove_seen=True)
     expected = np.array(
@@ -378,5 +375,94 @@ def test_get_normalized_scores(header):
     )
 
     assert actual.shape == (2, 7)
-    assert isinstance(actual, np.ndarray)
+    assert isinstance(actual, np.ndarray) is True
     assert np.isclose(expected, np.asarray(actual)).all()
+
+
+def test_match_similarity_type_from_json_file(header):
+    # store parameters in json
+    params_str = json.dumps({"similarity_type": "lift"})
+    # load parameters in json
+    params = json.loads(params_str)
+
+    params.update(header)
+
+    model = SAR(**params)
+
+    train = pd.DataFrame(
+        {
+            header["col_user"]: [1, 1, 1, 1, 2, 2, 2, 2],
+            header["col_item"]: [1, 2, 3, 4, 1, 5, 6, 7],
+            header["col_rating"]: [3.0, 4.0, 5.0, 4.0, 3.0, 2.0, 1.0, 5.0],
+            header["col_timestamp"]: [1, 20, 30, 400, 50, 60, 70, 800],
+        }
+    )
+
+    # make sure fit still works when similarity type is loaded from a json file
+    model.fit(train)
+
+
+def test_dataset_with_duplicates(header):
+    model = SAR(**header)
+    train = pd.DataFrame(
+        {
+            header["col_user"]: [1, 1, 2, 2, 2],
+            header["col_item"]: [1, 2, 1, 2, 2],
+            header["col_rating"]: [3.0, 4.0, 3.0, 4.0, 4.0],
+        }
+    )
+    with pytest.raises(ValueError):
+        model.fit(train)
+
+
+def test_get_topk_most_similar_users(header):
+    model = SAR(**header)
+    # 1, 2, and 4 used the same items, but 1 and 2 have the same ratings also
+    train = pd.DataFrame(
+        {
+            header["col_user"]: [1, 1, 2, 2, 3, 3, 3, 3, 4, 4],
+            header["col_item"]: [1, 2, 1, 2, 3, 4, 5, 6, 1, 2],
+            header["col_rating"]: [3.0, 4.0, 3.0, 4.0, 3.0, 2.0, 1.0, 5.0, 5.0, 1.0],
+        }
+    )
+    model.fit(train)
+
+    similar_users = model.get_topk_most_similar_users(user=1, top_k=1)
+    expected = pd.DataFrame(dict(UserId=[2], prediction=[25.0]))
+    assert_frame_equal(expected, similar_users)
+
+    similar_users = model.get_topk_most_similar_users(user=2, top_k=1)
+    expected = pd.DataFrame(dict(UserId=[1], prediction=[25.0]))
+    assert_frame_equal(expected, similar_users)
+
+    similar_users = model.get_topk_most_similar_users(user=1, top_k=2)
+    expected = pd.DataFrame(dict(UserId=[2, 4], prediction=[25.0, 19.0]))
+    assert_frame_equal(expected, similar_users)
+
+
+def test_item_frequencies(header):
+    model = SAR(**header)
+    train = pd.DataFrame(
+        {
+            header["col_user"]: [1, 1, 2, 2, 3, 3, 3, 3, 4, 4],
+            header["col_item"]: [1, 2, 1, 3, 3, 4, 5, 6, 1, 2],
+            header["col_rating"]: [3.0, 4.0, 5.0, 4.0, 3.0, 2.0, 1.0, 5.0, 1.0, 1.0],
+        }
+    )
+    model.fit(train)
+    assert model.item_frequencies[0] == 3
+
+
+def test_user_frequencies(header):
+    model = SAR(**header)
+    train = pd.DataFrame(
+        {
+            header["col_user"]: [1, 1, 2, 2, 3, 3, 3, 3, 4, 4],
+            header["col_item"]: [1, 2, 1, 3, 3, 4, 5, 6, 1, 2],
+            header["col_rating"]: [3.0, 4.0, 5.0, 4.0, 3.0, 2.0, 1.0, 5.0, 1.0, 1.0],
+        }
+    )
+    model.fit(train)
+    # run this method once so that user frequencies are calculated
+    model.get_popularity_based_topk(items=False)
+    assert model.user_frequencies[0] == 2

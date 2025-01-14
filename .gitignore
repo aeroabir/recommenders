@@ -87,8 +87,8 @@ celerybeat-schedule
 *.sage.py
 
 # Environments
-.env
-.venv
+.env*
+.venv*
 env/
 venv/
 ENV/
@@ -175,3 +175,6 @@ examples/07_tutorials/KDD2020-tutorial/data_folder/
 
 tests/**/resources/
 reports/
+
+### pip folders
+pip-wheel*

@@ -1,4 +1,4 @@
-# Copyright (c) Microsoft Corporation. All rights reserved.
+# Copyright (c) Recommenders contributors.
 # Licensed under the MIT License.
 
 import os
@@ -10,7 +10,6 @@ from contextlib import contextmanager
 from tempfile import TemporaryDirectory
 from tqdm import tqdm
 from retrying import retry
-import logging
 
 
 log = logging.getLogger(__name__)

@@ -1,4 +1,4 @@
-# Copyright (c) Microsoft Corporation. All rights reserved.
+# Copyright (c) Recommenders contributors.
 # Licensed under the MIT License.
 
 import logging
@@ -87,7 +87,7 @@ class LibffmConverter:
     """Converts an input dataframe to another dataframe in libffm format. A text file of the converted
     Dataframe is optionally generated.
 
-    .. note::
+    Note:
 
         The input dataframe is expected to represent the feature data in the following schema:
 
@@ -109,8 +109,8 @@ class LibffmConverter:
         The above data will be converted to the libffm format by following the convention as explained in
         `this paper <https://www.csie.ntu.edu.tw/~r01922136/slides/ffm.pdf>`_.
 
-        i.e. `<field_index>:<field_feature_index>:1` or `<field_index>:<field_index>:<field_feature_value>`, depending on
-        the data type of the features in the original dataframe.
+        i.e. `<field_index>:<field_feature_index>:1` or `<field_index>:<field_feature_index>:<field_feature_value>`,
+        depending on the data type of the features in the original dataframe.
 
     Args:
         filepath (str): path to save the converted data.
@@ -129,15 +129,15 @@ class LibffmConverter:
                 'field3': [1.0, 2.0, 3.0, 4.0, 5.0],
                 'field4': ['1', '2', '3', '4', '5']
             })
-        >>> converter = LibffmConveter().fit(df_feature, col_rating='rating')
+        >>> converter = LibffmConverter().fit(df_feature, col_rating='rating')
         >>> df_out = converter.transform(df_feature)
         >>> df_out
             rating field1 field2   field3 field4
-        0       1  1:1:1  2:4:3  3:5:1.0  4:4:1
-        1       0  1:2:1  2:4:4  3:5:2.0  4:5:1
-        2       0  1:3:1  2:4:5  3:5:3.0  4:6:1
-        3       1  1:3:1  2:4:6  3:5:4.0  4:7:1
-        4       1  1:3:1  2:4:7  3:5:5.0  4:8:1
+        0       1  1:1:1  2:4:3  3:5:1.0  4:6:1
+        1       0  1:2:1  2:4:4  3:5:2.0  4:7:1
+        2       0  1:3:1  2:4:5  3:5:3.0  4:8:1
+        3       1  1:3:1  2:4:6  3:5:4.0  4:9:1
+        4       1  1:3:1  2:4:7  3:5:5.0  4:10:1
     """
 
     def __init__(self, filepath=None):
@@ -163,7 +163,7 @@ class LibffmConverter:
         types = df.dtypes
         if not all(
             [
-                x == object or np.issubdtype(x, np.integer) or x == np.float
+                x == object or np.issubdtype(x, np.integer) or x == float
                 for x in types
             ]
         ):
@@ -360,19 +360,14 @@ def has_columns(df, columns):
 
     Args:
         df (pandas.DataFrame): DataFrame
-        columns (list(str): columns to check for
+        columns (iterable(str)): columns to check for
 
     Returns:
         bool: True if DataFrame has specified columns.
     """
-
-    result = True
-    for column in columns:
-        if column not in df.columns:
-            logger.error("Missing column: {} in DataFrame".format(column))
-            result = False
-
-    return result
+    if not isinstance(columns, set):
+        columns = set(columns)
+    return columns.issubset(df.columns)
 
 
 def has_same_base_dtype(df_1, df_2, columns=None):
